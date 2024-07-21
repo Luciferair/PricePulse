@@ -12,7 +12,6 @@ import time
 import random
 import requests
 
-
 app = Flask(__name__)
 CORS(app)
 
@@ -25,23 +24,27 @@ def get_amazon_item_name(url):
     }
 
     session = requests.Session()
-    response = session.get(url, headers=headers)
+    try:
+        response = session.get(url, headers=headers)
+    except requests.RequestException as e:
+        print(f"Error fetching URL: {e}")
+        return None
 
     if response.status_code == 200:
         soup = BeautifulSoup(response.content, 'html.parser')
-        
         title_tag = soup.find('span', {'id': 'productTitle'})
         if title_tag:
             return title_tag.get_text(strip=True)
         else:
+            print("Title tag not found")
             return None
     else:
+        print(f"Request failed with status code: {response.status_code}")
         return None
-    
 
 def setup_driver():
     chrome_options = Options()
-    chrome_options.add_argument("--headless") 
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     
@@ -55,10 +58,9 @@ def get_amazon_prices(item_name):
         driver.get(search_url)
         
         wait = WebDriverWait(driver, 10)
-        
         prices = []
         current_price = None
-        
+
         while True:
             try:
                 price_elements = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'span.a-price-whole')))
@@ -68,7 +70,7 @@ def get_amazon_prices(item_name):
                         current_price = float(first_price_element.text.replace('₹', '').replace(',', ''))
                     except ValueError:
                         current_price = None
-                
+
                 for price_element in price_elements:
                     try:
                         price = float(price_element.text.replace('₹', '').replace(',', ''))
@@ -89,7 +91,7 @@ def get_amazon_prices(item_name):
                 break
         
         driver.quit()
-        
+
         if prices:
             low_price = min(prices)
             high_price = max(prices)
@@ -100,38 +102,39 @@ def get_amazon_prices(item_name):
         print(f"Amazon scraping error: {e}")
         return None, None, None
 
-
 @app.route('/save_url', methods=['POST'])
 def save_url_data():
     data = request.get_json()
     url = data.get('url')
-    if url == "HOME":
-        print("okokko")
-        return jsonify({"error": "Home URL is not supported"}), 400
-    
-    else:
-        try: 
-            item_name = get_amazon_item_name(url)
-            if item_name:
-                current_price, low_price, high_price = get_amazon_prices(item_name)
-                if low_price is not None and high_price is not None:
-                    response = {
-                        'message': 'URL received and saved successfully.',
-                        'lowPrice': low_price,
-                        'currentPrice': current_price,
-                        'highPrice': high_price
-                    }
-                    return jsonify(response), 200
-                else:
-                    return jsonify({"error": "Failed to retrieve prices"}), 400
-            else:
-                return jsonify({"error": "Failed to retrieve item name from URL"}), 400
-            
-        except Exception as e:
-            print(f"Error in save_url_data: {e}")
-            return jsonify({"error": "An error occurred processing the request"}), 500
-    
+    print(f"Received URL: {url}")
 
+    if url == "HOME":
+        print("Home URL not supported")
+        return jsonify({"error": "Home URL is not supported"}), 400
+
+    try:
+        item_name = get_amazon_item_name(url)
+        print(f"Item name: {item_name}")
+
+        if item_name:
+            current_price, low_price, high_price = get_amazon_prices(item_name)
+            if low_price is not None and high_price is not None:
+                response = {
+                    'message': 'URL received and saved successfully.',
+                    'lowPrice': low_price,
+                    'currentPrice': current_price,
+                    'highPrice': high_price
+                }
+                return jsonify(response), 200
+            else:
+                print("Failed to retrieve prices")
+                return jsonify({"error": "Failed to retrieve prices"}), 400
+        else:
+            print("Failed to retrieve item name from URL")
+            return jsonify({"error": "Failed to retrieve item name from URL"}), 400
+    except Exception as e:
+        print(f"Error in save_url_data: {e}")
+        return jsonify({"error": "An error occurred processing the request"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
